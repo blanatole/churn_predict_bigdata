@@ -1,4 +1,4 @@
-# README: Dự đoán Khả năng Khách hàng Rời khỏi Dịch vụ
+Dự đoán Khả năng Khách hàng Rời khỏi Dịch vụ
 
 ## 1. Giới thiệu
 Dự án này nhằm dự đoán khả năng khách hàng rời khỏi dịch vụ dựa trên các đặc trưng như phương thức thanh toán, loại dịch vụ internet, thời gian sử dụng, và các yếu tố khác. Hệ thống được xây dựng trên nền tảng Big Data với PySpark để xử lý dữ liệu lớn và MongoDB để lưu trữ dữ liệu.
@@ -70,6 +70,6 @@ streamlit run app.py
 ```
 
 ## 9. Tác giả
-Repo thuộc sở hữu: [Nguyễn Minh Ý]
-Thành viên đóng góp: [Huỳnh Lý Tân Khoa, Nguyễn Thị Phương Anh, Võ Thị Như Ý]
-Email: [nguyenminhy7714@gmail.com] 
+Repo thuộc sở hữu: Nguyễn Minh Ý
+Thành viên đóng góp: Huỳnh Lý Tân Khoa, Nguyễn Thị Phương Anh, Võ Thị Như Ý
+Email: nguyenminhy7714@gmail.com
