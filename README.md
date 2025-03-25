@@ -20,10 +20,8 @@ Dự án này nhằm dự đoán khả năng khách hàng rời khỏi dịch v�
 ## 4. Dataset
 - Tập dữ liệu: `WA_Fn-UseC_-Telco-Customer-Churn.csv`
 - Các đặc trưng chính:
-  - Phương thức thanh toán
-  - Loại dịch vụ internet
-  - Thời gian sử dụng dịch vụ
-  - Tổng tiền thanh toán
+  - Phương thức thanh toán (`PaymentMethod`: Electronic check, Mailed check, Bank transfer (automatic), Credit card (automatic))
+  - Loại dịch vụ internet (`InternetService`: DSL, Fiber optic, No)
   - Khả năng rời đi (`Churn`: Yes/No)
 
 ## 5. Các bước thực hiện

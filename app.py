@@ -188,7 +188,7 @@ with tab1:
     streaming_movies = st.selectbox("StreamingMovies", ["Yes", "No", "No internet service"], key="predict_movies")
     contract = st.selectbox("Contract", ["Month-to-month", "One year", "Two year"], key="predict_contract")
     paperless_billing = st.selectbox("PaperlessBilling", ["Yes", "No"], key="predict_paperless")
-    payment_method = st.selectbox("PaymentMethod", ["Credit card", "Electronic check", "Mailed check", "Bank transfer"], key="predict_payment")
+    payment_method = st.selectbox("PaymentMethod", ["Credit card (automatic)", "Electronic check", "Mailed check", "Bank transfer (automatic)"], key="predict_payment")
     monthly_charges = st.number_input("MonthlyCharges", min_value=0.0, key="predict_monthly")
     total_charges = st.number_input("TotalCharges", min_value=0.0, key="predict_total")
     tenure = st.number_input("Tenure", min_value=0, key="predict_tenure")
@@ -236,7 +236,7 @@ with tab2:
 # Tab 3: Lọc khách hàng
 with tab3:
     st.header("Lọc khách hàng")
-    payment_method_filter = st.selectbox("Phương thức thanh toán", ["", "Credit card", "Electronic check", "Mailed check", "Bank transfer"], index=0, key="filter_pm")
+    payment_method_filter = st.selectbox("Phương thức thanh toán", ["", "Credit card (automatic)", "Electronic check", "Mailed check", "Bank transfer (automatic)"], index=0, key="filter_pm")
     internet_service_filter = st.selectbox("Loại dịch vụ Internet", ["", "DSL", "Fiber optic", "No"], index=0, key="filter_is")
     churn_filter = st.selectbox("Trạng thái Churn", ["", "Yes", "No"], index=0, key="filter_churn")
     if st.button("Lọc", key="filter_btn"):
@@ -262,7 +262,7 @@ with tab3:
 # Tab 4: Thống kê
 with tab4:
     st.header("Thống kê khách hàng")
-    payment_method_stat = st.selectbox("Lọc theo PaymentMethod", ["", "Credit card", "Electronic check", "Mailed check", "Bank transfer"], index=0, key="stat_pm")
+    payment_method_stat = st.selectbox("Lọc theo PaymentMethod", ["", "Credit card (automatic)", "Electronic check", "Mailed check", "Bank transfer (automatic)"], index=0, key="stat_pm")
     internet_service_stat = st.selectbox("Lọc theo InternetService", ["", "DSL", "Fiber optic", "No"], index=0, key="stat_is")
     if st.button("Thống kê", key="stat_btn"):
         stats = statistics(payment_method_stat if payment_method_stat else None,
