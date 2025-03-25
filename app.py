@@ -55,9 +55,9 @@ spark = init_spark()
 rf_model = load_rf_model(spark)
 db = init_mongo()
 
-st.write("SparkSession đã được khởi tạo thành công!")
-st.write("Mô hình Random Forest đã được tải thành công!")
-st.write(f"Python version in driver: {sys.version}")
+# st.write("SparkSession đã được khởi tạo thành công!")
+# st.write("Mô hình Random Forest đã được tải thành công!")
+# st.write(f"Python version in driver: {sys.version}")
 
 # Hàm dự đoán churn
 def predict_churn(payment_method, internet_service):
@@ -102,6 +102,27 @@ def search_by_customer_id(customer_id):
     result = list(db.customer_history.aggregate(pipeline))
     return result[0] if result else None
 
+@st.cache_data
+def get_all_customers(limit=100, skip=0):
+    pipeline = [
+        {"$lookup": {"from": "personal_info", "localField": "customerID", "foreignField": "customerID", "as": "personal"}},
+        {"$lookup": {"from": "services", "localField": "customerID", "foreignField": "customerID", "as": "service"}},
+        {"$lookup": {"from": "contract_payment", "localField": "customerID", "foreignField": "customerID", "as": "contract"}},
+        {"$lookup": {"from": "customer_history", "localField": "customerID", "foreignField": "customerID", "as": "history"}},
+        {"$unwind": {"path": "$personal", "preserveNullAndEmptyArrays": True}},
+        {"$unwind": {"path": "$service", "preserveNullAndEmptyArrays": True}},
+        {"$unwind": {"path": "$contract", "preserveNullAndEmptyArrays": True}},
+        {"$unwind": {"path": "$history", "preserveNullAndEmptyArrays": True}},
+        {"$project": {"_id": 0, "personal._id": 0, "service._id": 0, "contract._id": 0, "history._id": 0}},
+        {"$skip": skip},
+        {"$limit": limit}
+    ]
+    try:
+        return list(db.customer_history.aggregate(pipeline))
+    except Exception as e:
+        st.error(f"Lỗi khi lấy dữ liệu: {str(e)}")
+        return []
+
 # Hàm lọc khách hàng
 def filter_customers(payment_method=None, internet_service=None, churn=None):
     match_conditions = {}
@@ -129,48 +150,78 @@ def filter_customers(payment_method=None, internet_service=None, churn=None):
     return list(db.customer_history.aggregate(pipeline))
 
 # Hàm thống kê
-def statistics(payment_method=None, internet_service=None):
-    match_conditions = {}
-    if payment_method:
-        match_conditions["contract.PaymentMethod"] = payment_method
-    if internet_service:
-        match_conditions["service.InternetService"] = internet_service
+def statistics(filtered_customers):
+    if not filtered_customers:
+        return []
+    
+    # Tạo danh sách tổ hợp từ dữ liệu đã lọc
+    stats_data = []
+    for customer in filtered_customers:
+        stats_data.append({
+            "PaymentMethod": customer["contract"]["PaymentMethod"],
+            "InternetService": customer["service"]["InternetService"],
+            "Churn": customer["history"]["Churn"]
+        })
 
-    pipeline = [
-        {"$lookup": {"from": "personal_info", "localField": "customerID", "foreignField": "customerID", "as": "personal"}},
-        {"$lookup": {"from": "services", "localField": "customerID", "foreignField": "customerID", "as": "service"}},
-        {"$lookup": {"from": "contract_payment", "localField": "customerID", "foreignField": "customerID", "as": "contract"}},
-        {"$lookup": {"from": "customer_history", "localField": "customerID", "foreignField": "customerID", "as": "history"}},
-        {"$unwind": "$personal"},
-        {"$unwind": "$service"},
-        {"$unwind": "$contract"},
-        {"$unwind": "$history"}
+    # Nhóm và đếm số lượng cho từng tổ hợp
+    stats_dict = {}
+    total_count = len(filtered_customers)
+    for item in stats_data:
+        key = (item["PaymentMethod"], item["InternetService"], item["Churn"])
+        stats_dict[key] = stats_dict.get(key, 0) + 1
+
+    # Tạo danh sách thống kê cho bảng
+    stats_for_table = [
+        {
+            "PaymentMethod": k[0],
+            "InternetService": k[1],
+            "Churn": k[2],
+            "Count": v
+        }
+        for k, v in stats_dict.items()
     ]
-    if match_conditions:
-        pipeline.append({"$match": match_conditions})
-
-    pipeline.extend([
-        {"$group": {
-            "_id": {
-                "PaymentMethod": "$contract.PaymentMethod",
-                "InternetService": "$service.InternetService",
-                "Churn": "$history.Churn"
-            },
-            "count": {"$sum": 1}
-        }},
-        {"$sort": {"count": -1}}
-    ])
-
-    stats = list(db.customer_history.aggregate(pipeline))
-    return stats
+    
+    # Tạo danh sách thống kê cho biểu đồ (với Combination)
+    stats_for_chart = [
+        {
+            "Combination": f"{k[0]} | {k[1]} | {k[2]}",
+            "Count": v,
+            "Percentage": (v / total_count) * 100 if total_count > 0 else 0
+        }
+        for k, v in stats_dict.items()
+    ]
+    return stats_for_table, stats_for_chart
 
 # Giao diện Streamlit
 st.title("Ứng dụng Quản lý Khách hàng và Dự đoán Churn")
 
-tab1, tab2, tab3, tab4 = st.tabs(["Dự đoán Churn", "Tìm kiếm theo CustomerID", "Lọc khách hàng", "Thống kê"])
+tab1, tab2, tab3, tab4 = st.tabs(["Danh sách khách hàng","Dự đoán", "Tìm kiếm", "Thống kê"])
 
-# Tab 1: Dự đoán Churn
+# tab 1: Danh sách khách hàng
 with tab1:
+    st.header("Danh sách khách hàng")
+    page_size = 100
+    page = st.number_input("Trang", min_value=1, value=1, step=1)
+    skip = (page - 1) * page_size
+    all_customers = get_all_customers(limit=page_size, skip=skip)
+    if all_customers:
+        flat_data = []
+        for customer in all_customers:
+            flat_customer = {}
+            for key, value in customer.items():
+                if isinstance(value, dict):
+                    flat_customer.update(value)
+                else:
+                    flat_customer[key] = value
+            flat_data.append(flat_customer)
+        df_all = pd.DataFrame(flat_data)
+        st.write(f"Danh sách khách hàng (Trang {page}):")
+        customer_table = st.dataframe(df_all)
+    else:
+        st.warning("Không có dữ liệu khách hàng.")
+
+# Tab 2: Dự đoán Churn
+with tab2:
     st.header("Dự đoán khả năng rời bỏ dịch vụ")
     customer_id = st.text_input("CustomerID", key="predict_id")
     gender = st.selectbox("Gender", ["Male", "Female"], key="predict_gender")
@@ -194,27 +245,30 @@ with tab1:
     tenure = st.number_input("Tenure", min_value=0, key="predict_tenure")
 
     if st.button("Dự đoán"):
-        churn_result = predict_churn(payment_method, internet_service)
-        if churn_result is not None:
-            st.success(f"Kết quả dự đoán: Khách hàng {'có' if churn_result == 'Yes' else 'không'} khả năng rời bỏ dịch vụ.")
+        if db.prediction_results.find_one({"customerID": customer_id}):
+            st.error(f"CustomerID {customer_id} đã tồn tại trong kết quả dự đoán.")
+        else:
+            churn_result = predict_churn(payment_method, internet_service)
+            if churn_result is not None:
+                st.success(f"Kết quả dự đoán: Khách hàng {'có' if churn_result == 'Yes' else 'không'} khả năng rời bỏ dịch vụ.")
             # Lưu thông tin vào MongoDB
-            personal_info = {"customerID": customer_id, "gender": gender, "SeniorCitizen": senior_citizen, "Partner": partner, "Dependents": dependents}
-            services = {"customerID": customer_id, "PhoneService": phone_service, "MultipleLines": multiple_lines, "InternetService": internet_service, 
+                personal_info = {"customerID": customer_id, "gender": gender, "SeniorCitizen": senior_citizen, "Partner": partner, "Dependents": dependents}
+                services = {"customerID": customer_id, "PhoneService": phone_service, "MultipleLines": multiple_lines, "InternetService": internet_service, 
                         "OnlineSecurity": online_security, "OnlineBackup": online_backup, "DeviceProtection": device_protection, 
                         "TechSupport": tech_support, "StreamingTV": streaming_tv, "StreamingMovies": streaming_movies}
-            contract_payment = {"customerID": customer_id, "Contract": contract, "PaperlessBilling": paperless_billing, "PaymentMethod": payment_method, 
+                contract_payment = {"customerID": customer_id, "Contract": contract, "PaperlessBilling": paperless_billing, "PaymentMethod": payment_method, 
                                 "MonthlyCharges": monthly_charges, "TotalCharges": total_charges}
-            customer_history = {"customerID": customer_id, "tenure": tenure, "Churn": churn_result}
-            db.personal_info.insert_one(personal_info)
-            db.services.insert_one(services)
-            db.contract_payment.insert_one(contract_payment)
-            db.customer_history.insert_one(customer_history)
-            # Lưu kết quả dự đoán vào collection riêng
-            db.prediction_results.insert_one({"customerID": customer_id, "prediction": churn_result})
-            st.write("Thông tin đã được lưu vào MongoDB.")
+                customer_history = {"customerID": customer_id, "tenure": tenure, "Churn": churn_result}
+                db.personal_info.insert_one(personal_info)
+                db.services.insert_one(services)
+                db.contract_payment.insert_one(contract_payment)
+                db.customer_history.insert_one(customer_history)
+                # Lưu kết quả dự đoán vào collection riêng
+                db.prediction_results.insert_one({"customerID": customer_id, "prediction": churn_result})
+                st.write("Thông tin đã được lưu vào MongoDB.")
 
-# Tab 2: Tìm kiếm theo CustomerID
-with tab2:
+# Tab 3: Tìm kiếm theo CustomerID
+with tab3:
     st.header("Tìm kiếm theo CustomerID")
     customer_id_search = st.text_input("Nhập CustomerID:", key="search_id")
     if st.button("Tìm kiếm", key="search_btn"):
@@ -233,17 +287,40 @@ with tab2:
         else:
             st.error(f"Không tìm thấy khách hàng với CustomerID: {customer_id_search}")
 
-# Tab 3: Lọc khách hàng
-with tab3:
-    st.header("Lọc khách hàng")
-    payment_method_filter = st.selectbox("Phương thức thanh toán", ["", "Credit card (automatic)", "Electronic check", "Mailed check", "Bank transfer (automatic)"], index=0, key="filter_pm")
-    internet_service_filter = st.selectbox("Loại dịch vụ Internet", ["", "DSL", "Fiber optic", "No"], index=0, key="filter_is")
-    churn_filter = st.selectbox("Trạng thái Churn", ["", "Yes", "No"], index=0, key="filter_churn")
-    if st.button("Lọc", key="filter_btn"):
-        filtered_customers = filter_customers(payment_method_filter if payment_method_filter else None,
-                                             internet_service_filter if internet_service_filter else None,
-                                             churn_filter if churn_filter else None)
+# Tab 4: Lọc khách hàng
+with tab4:
+    st.header("Lọc và Thống kê khách hàng")
+    
+    # Phần lọc
+    payment_method_filter = st.selectbox(
+        "Phương thức thanh toán", 
+        ["", "Credit card (automatic)", "Electronic check", "Mailed check", "Bank transfer (automatic)"], 
+        index=0, 
+        key="filter_pm"
+    )
+    internet_service_filter = st.selectbox(
+        "Loại dịch vụ Internet", 
+        ["", "DSL", "Fiber optic", "No"], 
+        index=0, 
+        key="filter_is"
+    )
+    churn_filter = st.selectbox(
+        "Trạng thái Churn", 
+        ["", "Yes", "No"], 
+        index=0, 
+        key="filter_churn"
+    )
+    
+    if st.button("Lọc và Thống kê", key="filter_stat_btn"):
+        # Lọc dữ liệu
+        filtered_customers = filter_customers(
+            payment_method_filter if payment_method_filter else None,
+            internet_service_filter if internet_service_filter else None,
+            churn_filter if churn_filter else None
+        )
+        
         if filtered_customers:
+            # Hiển thị kết quả lọc (không thay đổi)
             flat_data = []
             for customer in filtered_customers:
                 flat_customer = {}
@@ -256,27 +333,30 @@ with tab3:
             df = pd.DataFrame(flat_data)
             st.write(f"Tìm thấy {len(filtered_customers)} khách hàng:")
             st.dataframe(df)
+
+            # Thống kê và hiển thị
+            stats_for_table, stats_for_chart = statistics(filtered_customers)
+            if stats_for_table:
+                # Hiển thị bảng thống kê với PaymentMethod, InternetService, Churn, Count
+                df_stats_table = pd.DataFrame(stats_for_table)
+                st.write("Bảng thống kê:")
+                st.dataframe(df_stats_table.T)  # Hiển thị bảng ngang
+
+                # Vẽ biểu đồ tròn theo tổ hợp feature
+                df_stats_chart = pd.DataFrame(stats_for_chart)
+                fig = px.pie(
+                    df_stats_chart, 
+                    values="Count", 
+                    names="Combination", 
+                    title="Tỷ lệ các tổ hợp feature (PaymentMethod | InternetService | Churn)",
+                    labels={"Combination": "Tổ hợp", "Count": "Số lượng"},
+                    hover_data=["Percentage"],
+                    hole=0.3
+                )
+                fig.update_traces(textposition="inside", textinfo="percent")
+                st.plotly_chart(fig)
+            else:
+                st.warning("Không có dữ liệu thống kê từ kết quả lọc.")
         else:
             st.warning("Không tìm thấy khách hàng nào thỏa mãn điều kiện.")
 
-# Tab 4: Thống kê
-with tab4:
-    st.header("Thống kê khách hàng")
-    payment_method_stat = st.selectbox("Lọc theo PaymentMethod", ["", "Credit card (automatic)", "Electronic check", "Mailed check", "Bank transfer (automatic)"], index=0, key="stat_pm")
-    internet_service_stat = st.selectbox("Lọc theo InternetService", ["", "DSL", "Fiber optic", "No"], index=0, key="stat_is")
-    if st.button("Thống kê", key="stat_btn"):
-        stats = statistics(payment_method_stat if payment_method_stat else None,
-                          internet_service_stat if internet_service_stat else None)
-        if stats:
-            df_stats = pd.DataFrame([{"PaymentMethod": stat["_id"]["PaymentMethod"], 
-                                     "InternetService": stat["_id"]["InternetService"], 
-                                     "Churn": stat["_id"]["Churn"], 
-                                     "Count": stat["count"]} for stat in stats])
-            st.write("Bảng thống kê:")
-            st.dataframe(df_stats.T)  # Hiển thị bảng ngang
-            # Vẽ biểu đồ tỷ lệ Yes/No
-            churn_counts = df_stats.groupby("Churn")["Count"].sum().reset_index()
-            fig = px.pie(churn_counts, values="Count", names="Churn", title="Tỷ lệ Churn (Yes/No)")
-            st.plotly_chart(fig)
-        else:
-            st.warning("Không có dữ liệu thống kê.")
