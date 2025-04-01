@@ -8,6 +8,7 @@ import sys
 import pandas as pd
 import plotly.express as px
 import json
+from collections import defaultdict
 
 # Đặt biến môi trường cho PySpark sử dụng Python từ môi trường ảo
 python_path = os.path.join(os.getcwd(), "venv", "Scripts", "python.exe")
@@ -108,7 +109,13 @@ def get_all_customers(limit=100, skip=0):
         {"$unwind": {"path": "$service", "preserveNullAndEmptyArrays": True}},
         {"$unwind": {"path": "$contract", "preserveNullAndEmptyArrays": True}},
         {"$unwind": {"path": "$history", "preserveNullAndEmptyArrays": True}},
-        {"$project": {"_id": 0, "personal._id": 0, "service._id": 0, "contract._id": 0, "history._id": 0}},
+        {"$project": {
+            "_id": 0,
+            "customerID": 1,
+            "PaymentMethod": "$contract.PaymentMethod",
+            "InternetService": "$service.InternetService",
+            "Churn": "$history.Churn"
+        }},
         {"$skip": skip},
         {"$limit": limit}
     ]
@@ -118,6 +125,7 @@ def get_all_customers(limit=100, skip=0):
         st.error(f"Lỗi khi lấy dữ liệu: {str(e)}")
         return []
 
+# Hàm filter_customers
 def filter_customers(payment_method=None, internet_service=None, churn=None):
     match_conditions = {}
     if payment_method:
@@ -143,22 +151,19 @@ def filter_customers(payment_method=None, internet_service=None, churn=None):
 
     return list(db.customer_history.aggregate(pipeline))
 
+# Hàm statistics
 def statistics(filtered_customers):
     if not filtered_customers:
-        return []
+        return [], []
     
-    stats_data = []
-    for customer in filtered_customers:
-        stats_data.append({
-            "PaymentMethod": customer["contract"]["PaymentMethod"],
-            "InternetService": customer["service"]["InternetService"],
-            "Churn": customer["history"]["Churn"]
-        })
-
     stats_dict = {}
     total_count = len(filtered_customers)
-    for item in stats_data:
-        key = (item["PaymentMethod"], item["InternetService"], item["Churn"])
+    for customer in filtered_customers:
+        key = (
+            customer["contract"]["PaymentMethod"],
+            customer["service"]["InternetService"],
+            customer["history"]["Churn"]
+        )
         stats_dict[key] = stats_dict.get(key, 0) + 1
 
     stats_for_table = [
@@ -181,32 +186,37 @@ def statistics(filtered_customers):
     ]
     return stats_for_table, stats_for_chart
 
+# Hàm hiển thị theo Churn
+def display_by_churn(all_customers):
+    if not all_customers:
+        return {}
+    
+    churn_dict = defaultdict(list)
+    for customer in all_customers:
+        churn = customer["Churn"]
+        churn_dict[churn].append({
+            "CustomerID": customer["customerID"],
+            "InternetService": customer["InternetService"],
+            "PaymentMethod": customer["PaymentMethod"]
+        })
+    return dict(churn_dict)
+
 # Giao diện Streamlit
 st.title("Ứng dụng Quản lý Khách hàng và Dự đoán Churn")
 
-tab1, tab2, tab3, tab4 = st.tabs(["Danh sách khách hàng", "Dự đoán", "Tìm kiếm", "Thống kê"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["Hiển thị đầy đủ", "Dự đoán", "Tìm kiếm", "Thống kê", "Hiển thị theo Churn"])
 
-# Tab 1: Danh sách khách hàng
+# Tab 1: Hiển thị đầy đủ (4 feature)
 with tab1:
-    st.header("Danh sách khách hàng")
+    st.header("Hiển thị đầy đủ khách hàng")
     page_size = 100
     page = st.number_input("Trang", min_value=1, value=1, step=1)
     skip = (page - 1) * page_size
     all_customers = get_all_customers(limit=page_size, skip=skip)
     if all_customers:
-        flat_data = []
-        for customer in all_customers:
-            flat_customer = {}
-            for key, value in customer.items():
-                if isinstance(value, dict):
-                    flat_customer.update(value)
-                else:
-                    flat_customer[key] = value
-            flat_data.append(flat_customer)
-        df_all = pd.DataFrame(flat_data)
-        st.write(f"Danh sách khách hàng (Trang {page}):")
+        df_all = pd.DataFrame(all_customers)
         st.dataframe(df_all)
-        # json_data = df_all.to_json(orient="records", force_ascii=False)
+        json_data = df_all.to_json(orient="records", force_ascii=False)
         # st.download_button(
         #     label="Tải xuống JSON",
         #     data=json_data,
@@ -220,25 +230,8 @@ with tab1:
 with tab2:
     st.header("Dự đoán khả năng rời bỏ dịch vụ")
     customer_id = st.text_input("CustomerID", key="predict_id")
-    gender = st.selectbox("Gender", ["Male", "Female"], key="predict_gender")
-    senior_citizen = st.selectbox("SeniorCitizen", [0, 1], key="predict_senior")
-    partner = st.selectbox("Partner", ["Yes", "No"], key="predict_partner")
-    dependents = st.selectbox("Dependents", ["Yes", "No"], key="predict_dependents")
-    phone_service = st.selectbox("PhoneService", ["Yes", "No"], key="predict_phone")
-    multiple_lines = st.selectbox("MultipleLines", ["Yes", "No", "No phone service"], key="predict_lines")
     internet_service = st.selectbox("InternetService", ["DSL", "Fiber optic", "No"], key="predict_internet")
-    online_security = st.selectbox("OnlineSecurity", ["Yes", "No", "No internet service"], key="predict_security")
-    online_backup = st.selectbox("OnlineBackup", ["Yes", "No", "No internet service"], key="predict_backup")
-    device_protection = st.selectbox("DeviceProtection", ["Yes", "No", "No internet service"], key="predict_protection")
-    tech_support = st.selectbox("TechSupport", ["Yes", "No", "No internet service"], key="predict_support")
-    streaming_tv = st.selectbox("StreamingTV", ["Yes", "No", "No internet service"], key="predict_tv")
-    streaming_movies = st.selectbox("StreamingMovies", ["Yes", "No", "No internet service"], key="predict_movies")
-    contract = st.selectbox("Contract", ["Month-to-month", "One year", "Two year"], key="predict_contract")
-    paperless_billing = st.selectbox("PaperlessBilling", ["Yes", "No"], key="predict_paperless")
     payment_method = st.selectbox("PaymentMethod", ["Credit card (automatic)", "Electronic check", "Mailed check", "Bank transfer (automatic)"], key="predict_payment")
-    monthly_charges = st.number_input("MonthlyCharges", min_value=0.0, key="predict_monthly")
-    total_charges = st.number_input("TotalCharges", min_value=0.0, key="predict_total")
-    tenure = st.number_input("Tenure", min_value=0, key="predict_tenure")
 
     if st.button("Dự đoán"):
         if db.prediction_results.find_one({"customerID": customer_id}):
@@ -248,47 +241,21 @@ with tab2:
             if churn_result is not None:
                 st.success(f"Kết quả dự đoán: Khách hàng {'có' if churn_result == 'Yes' else 'không'} khả năng rời bỏ dịch vụ.")
                 
-                # Tạo dictionary chứa tất cả thông tin đã nhập và kết quả dự đoán
                 prediction_data = {
                     "customerID": customer_id,
-                    "gender": gender,
-                    "SeniorCitizen": senior_citizen,
-                    "Partner": partner,
-                    "Dependents": dependents,
-                    "PhoneService": phone_service,
-                    "MultipleLines": multiple_lines,
                     "InternetService": internet_service,
-                    "OnlineSecurity": online_security,
-                    "OnlineBackup": online_backup,
-                    "DeviceProtection": device_protection,
-                    "TechSupport": tech_support,
-                    "StreamingTV": streaming_tv,
-                    "StreamingMovies": streaming_movies,
-                    "Contract": contract,
-                    "PaperlessBilling": paperless_billing,
                     "PaymentMethod": payment_method,
-                    "MonthlyCharges": monthly_charges,
-                    "TotalCharges": total_charges,
-                    "tenure": tenure,
                     "ChurnPrediction": churn_result
                 }
                 
-                # Lưu thông tin vào MongoDB
-                personal_info = {"customerID": customer_id, "gender": gender, "SeniorCitizen": senior_citizen, "Partner": partner, "Dependents": dependents}
-                services = {"customerID": customer_id, "PhoneService": phone_service, "MultipleLines": multiple_lines, "InternetService": internet_service, 
-                            "OnlineSecurity": online_security, "OnlineBackup": online_backup, "DeviceProtection": device_protection, 
-                            "TechSupport": tech_support, "StreamingTV": streaming_tv, "StreamingMovies": streaming_movies}
-                contract_payment = {"customerID": customer_id, "Contract": contract, "PaperlessBilling": paperless_billing, "PaymentMethod": payment_method, 
-                                    "MonthlyCharges": monthly_charges, "TotalCharges": total_charges}
-                customer_history = {"customerID": customer_id, "tenure": tenure, "Churn": churn_result}
-                db.personal_info.insert_one(personal_info)
+                services = {"customerID": customer_id, "InternetService": internet_service}
+                contract_payment = {"customerID": customer_id, "PaymentMethod": payment_method}
+                customer_history = {"customerID": customer_id, "Churn": churn_result}
                 db.services.insert_one(services)
                 db.contract_payment.insert_one(contract_payment)
                 db.customer_history.insert_one(customer_history)
                 db.prediction_results.insert_one({"customerID": customer_id, "prediction": churn_result})
-                st.write("Thông tin đã được lưu vào MongoDB.")
 
-                # Hiển thị nút tải xuống JSON
                 json_data = json.dumps(prediction_data, ensure_ascii=False, indent=4)
                 st.download_button(
                     label="Tải xuống JSON (Kết quả dự đoán)",
@@ -312,95 +279,68 @@ with tab3:
                     flat_data[key] = value
             flat_data.pop("customerID", None)
             df = pd.DataFrame([flat_data])
-            st.write(f"Thông tin khách hàng {customer_id_search}:")
-            st.dataframe(df)
-            json_data = df.to_json(orient="records", force_ascii=False)
-            # st.download_button(
-            #     label="Tải xuống JSON",
-            #     data=json_data,
-            #     file_name=f"customer_{customer_id_search}.json",
-            #     mime="application/json"
-            # )
-        else:
-            st.error(f"Không tìm thấy khách hàng với CustomerID: {customer_id_search}")
-
-# Tab 4: Lọc và Thống kê khách hàng
-with tab4:
-    st.header("Lọc và Thống kê khách hàng")
-    
-    payment_method_filter = st.selectbox(
-        "Phương thức thanh toán", 
-        ["", "Credit card (automatic)", "Electronic check", "Mailed check", "Bank transfer (automatic)"], 
-        index=0, 
-        key="filter_pm"
-    )
-    internet_service_filter = st.selectbox(
-        "Loại dịch vụ Internet", 
-        ["", "DSL", "Fiber optic", "No"], 
-        index=0, 
-        key="filter_is"
-    )
-    churn_filter = st.selectbox(
-        "Trạng thái Churn", 
-        ["", "Yes", "No"], 
-        index=0, 
-        key="filter_churn"
-    )
-    
-    if st.button("Lọc và Thống kê", key="filter_stat_btn"):
-        filtered_customers = filter_customers(
-            payment_method_filter if payment_method_filter else None,
-            internet_service_filter if internet_service_filter else None,
-            churn_filter if churn_filter else None
-        )
-        
-        if filtered_customers:
-            flat_data = []
-            for customer in filtered_customers:
-                flat_customer = {}
-                for key, value in customer.items():
-                    if isinstance(value, dict):
-                        flat_customer.update(value)
-                    else:
-                        flat_customer[key] = value
-                flat_data.append(flat_customer)
-            df = pd.DataFrame(flat_data)
-            st.write(f"Tìm thấy {len(filtered_customers)} khách hàng:")
             st.dataframe(df)
             json_data = df.to_json(orient="records", force_ascii=False)
             st.download_button(
-                label="Tải xuống JSON (Danh sách lọc)",
+                label="Tải xuống JSON",
                 data=json_data,
-                file_name="filtered_customers.json",
+                file_name=f"customer_{customer_id_search}.json",
+                mime="application/json"
+            )
+        else:
+            st.error(f"Không tìm thấy khách hàng với CustomerID: {customer_id_search}")
+
+# Tab 4: Thống kê (sử dụng filter_customers và statistics)
+with tab4:
+    st.header("Thống kê khách hàng")
+    # Gọi filter_customers với tất cả tham số là None để lấy toàn bộ dữ liệu
+    all_customers = filter_customers(payment_method=None, internet_service=None, churn=None)
+    if all_customers:
+        stats_for_table, stats_for_chart = statistics(all_customers)
+        if stats_for_table:
+            df_stats_table = pd.DataFrame(stats_for_table)
+            st.dataframe(df_stats_table.T)
+            json_data_stats = df_stats_table.to_json(orient="records", force_ascii=False)
+            st.download_button(
+                label="Tải xuống JSON (Thống kê)",
+                data=json_data_stats,
+                file_name="statistics.json",
                 mime="application/json"
             )
 
-            stats_for_table, stats_for_chart = statistics(filtered_customers)
-            if stats_for_table:
-                df_stats_table = pd.DataFrame(stats_for_table)
-                st.write("Bảng thống kê:")
-                st.dataframe(df_stats_table.T)
-                json_data_stats = df_stats_table.to_json(orient="records", force_ascii=False)
-                st.download_button(
-                    label="Tải xuống JSON (Thống kê)",
-                    data=json_data_stats,
-                    file_name="statistics.json",
-                    mime="application/json"
-                )
-
-                df_stats_chart = pd.DataFrame(stats_for_chart)
-                fig = px.pie(
-                    df_stats_chart, 
-                    values="Count", 
-                    names="Combination", 
-                    title="Tỷ lệ các tổ hợp feature (PaymentMethod | InternetService | Churn)",
-                    labels={"Combination": "Tổ hợp", "Count": "Số lượng"},
-                    hover_data=["Percentage"],
-                    hole=0.3
-                )
-                fig.update_traces(textposition="inside", textinfo="percent")
-                st.plotly_chart(fig)
-            else:
-                st.warning("Không có dữ liệu thống kê từ kết quả lọc.")
+            df_stats_chart = pd.DataFrame(stats_for_chart)
+            fig = px.pie(
+                df_stats_chart, 
+                values="Count", 
+                names="Combination", 
+                title="Tỷ lệ các tổ hợp feature (PaymentMethod | InternetService | Churn)",
+                labels={"Combination": "Tổ hợp", "Count": "Số lượng"},
+                hover_data=["Percentage"],
+                hole=0.3
+            )
+            fig.update_traces(textposition="inside", textinfo="percent")
+            st.plotly_chart(fig)
         else:
-            st.warning("Không tìm thấy khách hàng nào thỏa mãn điều kiện.")
+            st.warning("Không có dữ liệu thống kê.")
+    else:
+        st.warning("Không có dữ liệu khách hàng.")
+
+# Tab 5: Hiển thị theo Churn
+with tab5:
+    st.header("Hiển thị theo Churn")
+    all_customers = get_all_customers()  # Lấy tất cả khách hàng
+    if all_customers:
+        churn_data = display_by_churn(all_customers)
+        for churn, customers in churn_data.items():
+            st.subheader(f"Churn: {churn}")
+            df_churn = pd.DataFrame(customers)
+            st.dataframe(df_churn)
+            json_data = df_churn.to_json(orient="records", force_ascii=False)
+            st.download_button(
+                label=f"Tải xuống JSON (Churn {churn})",
+                data=json_data,
+                file_name=f"churn_{churn}.json",
+                mime="application/json"
+            )
+    else:
+        st.warning("Không có dữ liệu khách hàng.")
