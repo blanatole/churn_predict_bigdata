@@ -125,44 +125,18 @@ def get_all_customers(limit=100, skip=0):
         st.error(f"Lỗi khi lấy dữ liệu: {str(e)}")
         return []
 
-# Hàm filter_customers
-def filter_customers(payment_method=None, internet_service=None, churn=None):
-    match_conditions = {}
-    if payment_method:
-        match_conditions["contract.PaymentMethod"] = payment_method
-    if internet_service:
-        match_conditions["service.InternetService"] = internet_service
-    if churn:
-        match_conditions["history.Churn"] = churn
-
-    pipeline = [
-        {"$lookup": {"from": "personal_info", "localField": "customerID", "foreignField": "customerID", "as": "personal"}},
-        {"$lookup": {"from": "services", "localField": "customerID", "foreignField": "customerID", "as": "service"}},
-        {"$lookup": {"from": "contract_payment", "localField": "customerID", "foreignField": "customerID", "as": "contract"}},
-        {"$lookup": {"from": "customer_history", "localField": "customerID", "foreignField": "customerID", "as": "history"}},
-        {"$unwind": {"path": "$personal", "preserveNullAndEmptyArrays": True}},
-        {"$unwind": {"path": "$service", "preserveNullAndEmptyArrays": True}},
-        {"$unwind": {"path": "$contract", "preserveNullAndEmptyArrays": True}},
-        {"$unwind": {"path": "$history", "preserveNullAndEmptyArrays": True}},
-        {"$project": {"_id": 0, "personal._id": 0, "service._id": 0, "contract._id": 0, "history._id": 0}}
-    ]
-    if match_conditions:
-        pipeline.append({"$match": match_conditions})
-
-    return list(db.customer_history.aggregate(pipeline))
-
 # Hàm statistics
-def statistics(filtered_customers):
-    if not filtered_customers:
+def statistics(all_customers):
+    if not all_customers:
         return [], []
     
     stats_dict = {}
-    total_count = len(filtered_customers)
-    for customer in filtered_customers:
+    total_count = len(all_customers)
+    for customer in all_customers:
         key = (
-            customer["contract"]["PaymentMethod"],
-            customer["service"]["InternetService"],
-            customer["history"]["Churn"]
+            customer["PaymentMethod"],
+            customer["InternetService"],
+            customer["Churn"]
         )
         stats_dict[key] = stats_dict.get(key, 0) + 1
 
@@ -171,7 +145,7 @@ def statistics(filtered_customers):
             "PaymentMethod": k[0],
             "InternetService": k[1],
             "Churn": k[2],
-            "Count": v
+            "Percentage": f"{(v / total_count) * 100:.2f}%"
         }
         for k, v in stats_dict.items()
     ]
@@ -281,20 +255,19 @@ with tab3:
             df = pd.DataFrame([flat_data])
             st.dataframe(df)
             json_data = df.to_json(orient="records", force_ascii=False)
-            st.download_button(
-                label="Tải xuống JSON",
-                data=json_data,
-                file_name=f"customer_{customer_id_search}.json",
-                mime="application/json"
-            )
+            # st.download_button(
+            #     label="Tải xuống JSON",
+            #     data=json_data,
+            #     file_name=f"customer_{customer_id_search}.json",
+            #     mime="application/json"
+            # )
         else:
             st.error(f"Không tìm thấy khách hàng với CustomerID: {customer_id_search}")
 
-# Tab 4: Thống kê (sử dụng filter_customers và statistics)
+# Tab 4: Thống kê 
 with tab4:
     st.header("Thống kê khách hàng")
-    # Gọi filter_customers với tất cả tham số là None để lấy toàn bộ dữ liệu
-    all_customers = filter_customers(payment_method=None, internet_service=None, churn=None)
+    all_customers = get_all_customers(limit=100000, skip=0)  # Lấy tất cả khách hàng
     if all_customers:
         stats_for_table, stats_for_chart = statistics(all_customers)
         if stats_for_table:
@@ -336,11 +309,11 @@ with tab5:
             df_churn = pd.DataFrame(customers)
             st.dataframe(df_churn)
             json_data = df_churn.to_json(orient="records", force_ascii=False)
-            st.download_button(
-                label=f"Tải xuống JSON (Churn {churn})",
-                data=json_data,
-                file_name=f"churn_{churn}.json",
-                mime="application/json"
-            )
+            # st.download_button(
+            #     label=f"Tải xuống JSON (Churn {churn})",
+            #     data=json_data,
+            #     file_name=f"churn_{churn}.json",
+            #     mime="application/json"
+            # )
     else:
         st.warning("Không có dữ liệu khách hàng.")
